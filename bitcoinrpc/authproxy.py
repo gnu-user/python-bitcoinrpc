@@ -80,7 +80,7 @@ def EncodeDecimal(o):
 class AuthServiceProxy(object):
     __id_count = 0
 
-    def __init__(self, service_url, service_name=None, timeout=HTTP_TIMEOUT, connection=None):
+    def __init__(self, service_url, service_name=None, timeout=HTTP_TIMEOUT):
         self.__service_url = service_url
         self.__service_name = service_name
         self.__url = urlparse.urlparse(service_url)
@@ -102,10 +102,7 @@ class AuthServiceProxy(object):
 
         self.__timeout = timeout
 
-        if connection:
-            # Callables re-use the connection of the original proxy
-            self.__conn = connection
-        elif self.__url.scheme == 'https':
+        if self.__url.scheme == 'https':
             self.__conn = httplib.HTTPSConnection(self.__url.hostname, port,
                                                   timeout=timeout)
         else:
@@ -118,7 +115,7 @@ class AuthServiceProxy(object):
             raise AttributeError
         if self.__service_name is not None:
             name = "%s.%s" % (self.__service_name, name)
-        return AuthServiceProxy(self.__service_url, name, self.__timeout, self.__conn)
+        return AuthServiceProxy(self.__service_url, name, self.__timeout)
 
     def __call__(self, *args):
         AuthServiceProxy.__id_count += 1
