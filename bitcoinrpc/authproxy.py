@@ -80,7 +80,7 @@ def EncodeDecimal(o):
 class AuthServiceProxy(object):
     __id_count = 0
 
-    def __init__(self, service_url, service_name=None, timeout=HTTP_TIMEOUT):
+    def __init__(self, service_url, service_name=None, timeout=HTTP_TIMEOUT, connection=None):
         self.__service_url = service_url
         self.__service_name = service_name
         self.__url = urlparse.urlparse(service_url)
@@ -102,7 +102,10 @@ class AuthServiceProxy(object):
 
         self.__timeout = timeout
 
-        if self.__url.scheme == 'https':
+        if connection:
+            # Callables re-use the connection of the original proxy
+            self.__conn = connection
+        elif self.__url.scheme == 'https':
             self.__conn = httplib.HTTPSConnection(self.__url.hostname, port,
                                                   timeout=timeout)
         else:
@@ -115,7 +118,7 @@ class AuthServiceProxy(object):
             raise AttributeError
         if self.__service_name is not None:
             name = "%s.%s" % (self.__service_name, name)
-        return AuthServiceProxy(self.__service_url, name, self.__timeout)
+        return AuthServiceProxy(self.__service_url, name, self.__timeout, self.__conn)
 
     def __call__(self, *args):
         AuthServiceProxy.__id_count += 1
@@ -126,20 +129,34 @@ class AuthServiceProxy(object):
                                'method': self.__service_name,
                                'params': args,
                                'id': AuthServiceProxy.__id_count}, default=EncodeDecimal)
-        self.__conn.request('POST', self.__url.path, postdata,
-                            {'Host': self.__url.hostname,
-                             'User-Agent': USER_AGENT,
-                             'Authorization': self.__auth_header,
-                             'Content-type': 'application/json'})
-        self.__conn.sock.settimeout(self.__timeout)
 
-        response = self._get_response()
+        method = 'POST'
+        headers = {
+            'Host': self.__url.hostname,
+            'User-Agent': USER_AGENT,
+            'Authorization': self.__auth_header,
+            'Content-type': 'application/json'
+        }
+
+        try:
+            self.__conn.request(method, self.__url.path, postdata, headers)
+            self.__conn.sock.settimeout(self.__timeout)
+            response = self._get_response()
+        except httplib.BadStatusLine as e:
+            if e.line == "''": # if connection was closed, try again
+                self.__conn.close()
+                self.__conn.request(method, self.__url.path, postdata, headers)
+                self.__conn.sock.settimeout(self.__timeout)
+                response = self._get_response()
+            else:
+                raise e
+
         if response.get('error') is not None:
             raise JSONRPCException(response['error'])
         elif 'result' not in response:
             raise JSONRPCException({
                 'code': -343, 'message': 'missing JSON-RPC result'})
-        
+
         return response['result']
 
     def batch_(self, rpc_calls):
